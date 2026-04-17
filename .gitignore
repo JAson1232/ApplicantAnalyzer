@@ -4,3 +4,4 @@
 !.env.example
 .claude
 .claude/
+.gitignore
