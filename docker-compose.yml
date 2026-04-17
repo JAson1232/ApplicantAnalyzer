@@ -1,0 +1,92 @@
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      - frontend
+      - backend
+    ports:
+      - "${NGINX_PORT:-80}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - uploads:/var/www/uploads:ro
+    networks:
+      - appnet
+
+  frontend:
+    image: node:20-alpine
+    working_dir: /app
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      CHOKIDAR_USEPOLLING: "true"
+    command: >-
+      sh -c "
+      if [ -f package.json ]; then
+        npm install && npm run dev -- --host 0.0.0.0 --port 3000;
+      else
+        echo 'frontend/package.json not found. Waiting for frontend implementation...' && tail -f /dev/null;
+      fi"
+    volumes:
+      - ./frontend:/app
+    expose:
+      - "3000"
+    networks:
+      - appnet
+
+  backend:
+    image: node:20-alpine
+    working_dir: /app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 4000
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      UPLOAD_DIR: ${UPLOAD_DIR:-/app/uploads}
+    command: >-
+      sh -c "
+      if [ -f package.json ]; then
+        npm install && (npm run dev || npm start);
+      else
+        echo 'backend/package.json not found. Waiting for backend implementation...' && tail -f /dev/null;
+      fi"
+    volumes:
+      - ./backend:/app
+      - ./db:/db:ro
+      - uploads:/app/uploads
+    expose:
+      - "4000"
+    networks:
+      - appnet
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-applicant_analyser}
+      POSTGRES_USER: ${POSTGRES_USER:-applicant}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-applicant}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-applicant} -d ${POSTGRES_DB:-applicant_analyser}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks:
+      - appnet
+
+volumes:
+  postgres_data:
+  uploads:
+
+networks:
+  appnet:
+    driver: bridge
